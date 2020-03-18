@@ -8,6 +8,7 @@
 import Foundation
 import QuartzCore
 import CoreGraphics
+import AVKit
 
 extension FillRule {
   var cgFillRule: CGPathFillRule {
@@ -35,6 +36,8 @@ class FillRenderer: PassThroughOutputNode, Renderable {
   let shouldRenderInContext: Bool = false
   
   var isEnabled: Bool = true
+    
+//  private var videoWriter: AVAssetWriter?
   
   func updateShapeLayer(layer: CAShapeLayer) {
     layer.fillColor = color

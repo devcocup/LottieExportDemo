@@ -84,6 +84,8 @@ class ShapeRenderLayer: ShapeContainerLayer {
       shapeLayer.path = renderer.outputPath
       renderer.updateShapeLayer(layer: shapeLayer)
     }
+    
+    
   }
   
   override func draw(in ctx: CGContext) {

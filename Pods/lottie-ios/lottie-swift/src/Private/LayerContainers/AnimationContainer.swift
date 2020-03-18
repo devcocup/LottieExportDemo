@@ -136,6 +136,7 @@ class AnimationContainer: CALayer {
         mattedLayer = layer
       }
       addSublayer(layer)
+      
     }
     
     layerImageProvider.addImageLayers(imageLayers)
@@ -187,8 +188,36 @@ class AnimationContainer: CALayer {
       newFrame = floor(newFrame)
     }
     animationLayers.forEach( { $0.displayWithFrame(frame: newFrame, forceUpdates: false) })
+    
+    // Get Image from CALayer
+    UIGraphicsBeginImageContextWithOptions(self.bounds.size, self.isOpaque, 0)
+    self.render(in: UIGraphicsGetCurrentContext()!)
+    let image = UIGraphicsGetImageFromCurrentImageContext()
+    UIGraphicsEndImageContext()
+
+    if let pngRepresentation = image!.pngData() {
+        if let filePath = filePath(forKey: "\(newFrame)") {
+            print(filePath)
+            do  {
+                try pngRepresentation.write(to: filePath,
+                                            options: .atomic)
+            } catch let err {
+                print("Saving file resulted in error: ", err)
+            }
+        }
+    }
   }
   
+}
+
+private func randomString(length: Int) -> String {
+  let letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+  return String((0..<length).map{ _ in letters.randomElement()! })
+}
+
+private func filePath(forKey key: String) -> URL? {
+    let directory = NSTemporaryDirectory()
+    return NSURL.fileURL(withPathComponents: [directory, key + ".png"])
 }
 
 fileprivate class BlankImageProvider: AnimationImageProvider {

@@ -26,7 +26,7 @@ class ViewController: UIViewController {
         super.viewDidLoad()
         
         view.backgroundColor = .black
-        Animation.loadedFrom(url: URL(string: "https://assets9.lottiefiles.com/packages/lf20_dH29dn.json")!,
+        Animation.loadedFrom(url: URL(string: "https://assets6.lottiefiles.com/packages/lf20_rgVCMT.json")!,
                              closure: { animation in self.animationLoaded(newAnimation: animation) },
                              animationCache: nil)
     }
@@ -36,11 +36,11 @@ class ViewController: UIViewController {
         animationView?.frame = CGRect(x: 0, y: 0, width: 300, height: 300)
         animationView?.center = view.center
         
-        animationView?.loopMode = .loop
-        animationView?.play()
-        
+//        animationView?.loopMode = .loop
+//        animationView?.play()
+                
         view.addSubview(animationView!)
-        
+                
         animation = newAnimation
         startExport()
         
@@ -174,107 +174,8 @@ class ViewController: UIViewController {
         let outputURL = documentsDirectory.appendingPathComponent("processed.mov")
         try? FileManager.default.removeItem(at: outputURL)
         
-        let fps = Int64(animation?.framerate ?? 30)
-        var framesMax = CGFloat(fps)
-                        
-        if let animation = animation {
-            framesMax = CGFloat(animation.duration * Double(fps))
-        }
-        
-        animationView?.loopMode = .playOnce
-        animationView?.stop()
+        animationView!.export(url: outputURL)
                 
-        /*
-         * Set up VideoWriter
-         */
-        do {
-            try videoWriter = AVAssetWriter(outputURL: outputURL, fileType: AVFileType.mov)
-        } catch let error {
-            throw(error)
-        }
-        
-        guard let videoWriter = videoWriter else {
-            return
-        }
-        
-        let videoSettings: [String : Any] = [
-            AVVideoCodecKey : AVVideoCodecType.h264,
-            AVVideoWidthKey : size.width,
-            AVVideoHeightKey : size.height,
-        ]
-        
-        let videoWriterInput = AVAssetWriterInput(mediaType: AVMediaType.video, outputSettings: videoSettings)
-        
-        let sourceBufferAttributes: [String : Any] = [
-            (kCVPixelBufferPixelFormatTypeKey as String): Int(kCVPixelFormatType_32ARGB),
-            (kCVPixelBufferWidthKey as String): Float(size.width),
-            (kCVPixelBufferHeightKey as String): Float(size.height)
-        ]
-        
-        let pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: videoWriterInput,
-                                                                      sourcePixelBufferAttributes: sourceBufferAttributes)
-        
-        assert(videoWriter.canAdd(videoWriterInput))
-        videoWriter.add(videoWriterInput)
-        
-        if videoWriter.startWriting() {
-            let startTime = Date()
-            videoWriter.startSession(atSourceTime: CMTime.zero)
-            assert(pixelBufferAdaptor.pixelBufferPool != nil)
-            
-            let writeQueue = DispatchQueue(label: "writeQueue", qos: .userInteractive)
-            
-            videoWriterInput.requestMediaDataWhenReady(on: writeQueue, using: {
-                let frameDuration = CMTimeMake(value: 1, timescale: Int32(fps))
-                var frameCount: Int64 = 0
-                
-                /*
-                 * Start render loop
-                 */
-                while(Int(frameCount) < Int(framesMax)) {
-                    if videoWriterInput.isReadyForMoreMediaData {
-                        DispatchQueue.main.sync {
-                            let lastFrameTime = CMTimeMake(value: frameCount, timescale: Int32(fps))
-                            let presentationTime = frameCount == 0 ? lastFrameTime : CMTimeAdd(lastFrameTime, frameDuration)
-                            
-                            // Set up Lottie
-                            self.animationView?.currentProgress = CGFloat(frameCount) / framesMax
-
-                            UIGraphicsBeginImageContextWithOptions(self.size, false, 0.0)
-                            
-                            if let animationView = self.animationView {
-                                animationView.drawHierarchy(in: animationView.frame,
-                                                            afterScreenUpdates: false)
-                            }
-                            
-                            let image = UIGraphicsGetImageFromCurrentImageContext()
-                            UIGraphicsEndImageContext()
-                            
-                            do {
-                                try append(pixelBufferAdaptor: pixelBufferAdaptor,
-                                                with: image!,
-                                                at: presentationTime,
-                                                success: {
-                                                    frameCount += 1
-                                })
-                            } catch {
-                            } // Do not throw here
-                        }
-                    }
-                }
-                
-                videoWriterInput.markAsFinished()
-                
-                videoWriter.finishWriting {
-                    print("--- \(startTime.timeIntervalSinceNow * -1) seconds elapsed for AVAssetWriterInput")
-                    
-                    self.toggleOldExportButton(needEnable: true)
-
-                    self.animationView?.loopMode = .loop
-                    playVideo(url: videoWriter.outputURL)
-                }
-            })
-        }
     }
 }
 

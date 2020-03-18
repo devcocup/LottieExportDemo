@@ -7,6 +7,7 @@
 
 import Foundation
 import QuartzCore
+import AVKit
 
 /// Describes the behavior of an AnimationView when the app is moved to the background.
 public enum LottieBackgroundBehavior {
@@ -271,6 +272,193 @@ final public class AnimationView: LottieView {
     removeCurrentAnimation()
     addNewAnimationForContext(context)
   }
+    
+    public func export(url: URL) {
+        play { (_) in
+            self.exportVideo(outputURL: url);
+        }
+    }
+    
+    private func removeTempImages() {
+        let fileManager = FileManager.default
+        let tempFolderPath = NSTemporaryDirectory()
+        do {
+            let filePaths = try fileManager.contentsOfDirectory(atPath: tempFolderPath)
+            for filePath in filePaths {
+                try fileManager.removeItem(atPath: tempFolderPath + filePath)
+            }
+        } catch {
+            print("Could not clear temp folder: \(error)")
+        }
+    }
+    
+    private func exportVideo(outputURL: URL) {
+        let videoWriter: AVAssetWriter?
+        let size = CGSize(width: 2400, height: 2400)
+        
+        let fps = Int64(animation?.framerate ?? 30)
+        
+        do {
+            videoWriter = try AVAssetWriter(outputURL: outputURL, fileType: AVFileType.mov)
+            let videoSettings: [String : Any] = [
+                AVVideoCodecKey : AVVideoCodecH264,
+                AVVideoWidthKey : size.width,
+                AVVideoHeightKey : size.height,
+            ]
+            
+            let videoWriterInput = AVAssetWriterInput(mediaType: AVMediaType.video, outputSettings: videoSettings)
+            
+            let sourceBufferAttributes: [String : Any] = [
+                (kCVPixelBufferPixelFormatTypeKey as String): Int(kCVPixelFormatType_32ARGB),
+                (kCVPixelBufferWidthKey as String): Float(size.width),
+                (kCVPixelBufferHeightKey as String): Float(size.height)
+            ]
+            
+            let pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: videoWriterInput,
+                                                                          sourcePixelBufferAttributes: sourceBufferAttributes)
+                
+            assert(videoWriter!.canAdd(videoWriterInput))
+            videoWriter!.add(videoWriterInput)
+                
+            if videoWriter!.startWriting() {
+                let startTime = Date()
+                videoWriter!.startSession(atSourceTime: CMTime.zero)
+                    assert(pixelBufferAdaptor.pixelBufferPool != nil)
+                    
+                    let writeQueue = DispatchQueue(label: "writeQueue", qos: .userInteractive)
+                    
+                    videoWriterInput.requestMediaDataWhenReady(on: writeQueue, using: {
+                        let frameDuration = CMTimeMake(value: 1, timescale: Int32(fps))
+                        var frameCount: Int64 = 0
+                        
+                        /*
+                         * Start render loop
+                         */
+                        
+                        let fileManager = FileManager.default
+                        let documentDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                        let directoryContents = try! fileManager.contentsOfDirectory(at: documentDirectory, includingPropertiesForKeys: nil)
+                        for imageURL in directoryContents where imageURL.pathExtension == "png" {
+                            let filename = imageURL.deletingPathExtension().lastPathComponent
+//                            let currentFrame = filename.split(separator: "_")[1]
+                            if let image = UIImage(contentsOfFile: imageURL.path) {
+                                // now do something with your image
+                                if videoWriterInput.isReadyForMoreMediaData {
+                                    DispatchQueue.main.sync {
+                                        let lastFrameTime = CMTimeMake(value: frameCount, timescale: Int32(fps))
+                                        let presentationTime = frameCount == 0 ? lastFrameTime : CMTimeAdd(lastFrameTime, frameDuration)
+                                        
+                                        do {
+                                            try self.append(pixelBufferAdaptor: pixelBufferAdaptor,
+                                                            with: image,
+                                                            at: presentationTime,
+                                                            success: {
+                                                                frameCount += 1
+                                            })
+                                        } catch {
+                                        } // Do not throw here
+                                    }
+                                }
+                            } else {
+                               fatalError("Can't create image from file \(imageURL)")
+                            }
+                        }
+                        
+                        videoWriterInput.markAsFinished()
+                        
+                        videoWriter!.finishWriting {
+                            print("--- \(startTime.timeIntervalSinceNow * -1) seconds elapsed for AVAssetWriterInput")
+                        }
+                        
+//                        self.removeTempImages()
+                    })
+                }
+        } catch {
+            
+        }
+    }
+    
+    private func append(pixelBufferAdaptor adaptor: AVAssetWriterInputPixelBufferAdaptor, with image: UIImage, at presentationTime: CMTime, success: @escaping (() -> ())) throws {
+        do {
+            if let pixelBufferPool = adaptor.pixelBufferPool {
+                let pixelBufferPointer = UnsafeMutablePointer<CVPixelBuffer?>.allocate(capacity: MemoryLayout<CVPixelBuffer?>.size)
+                let status: CVReturn = CVPixelBufferPoolCreatePixelBuffer(
+                  kCFAllocatorDefault,
+                  pixelBufferPool,
+                  pixelBufferPointer
+                )
+                guard let pixelBuffer = pixelBufferPointer.pointee else {
+                    return
+                }
+                guard status == 0 else {
+                    return
+                }
+                
+                fill(pixelBuffer: pixelBuffer, with: image)
+                if adaptor.append(pixelBuffer, withPresentationTime: presentationTime) {
+                    pixelBufferPointer.deinitialize(count:1)
+                    success()
+                } else {
+                }
+                
+                pixelBufferPointer.deallocate()
+            }
+        } catch let error {
+            throw error
+        }
+    }
+
+    // Populates the pixel buffer with the contents of the current image
+    private func fill(pixelBuffer: CVPixelBuffer, with image: UIImage) {
+        // lock the buffer memoty so no one can access it during manipulation
+        CVPixelBufferLockBaseAddress(pixelBuffer, CVPixelBufferLockFlags(rawValue: CVOptionFlags(0)))
+        
+        // get the pixel data from the address in the memory
+        let pixelData = CVPixelBufferGetBaseAddress(pixelBuffer)
+        
+        // create a color scheme
+        let rgbColorSpace = CGColorSpaceCreateDeviceRGB()
+        
+        /// set the context size
+        let contextSize = image.size
+        
+        // generate a context where the image will be drawn
+        if let context = CGContext(data: pixelData,
+                                   width: Int(contextSize.width),
+                                   height: Int(contextSize.height),
+                                   bitsPerComponent: 8,
+                                   bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
+                                   space: rgbColorSpace,
+                                   bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue) {
+            
+            var imageHeight = image.size.height
+            var imageWidth = image.size.width
+            
+            if Int(imageHeight) > context.height {
+                imageHeight = 16 * (CGFloat(context.height) / 16).rounded(.awayFromZero)
+            } else if Int(imageWidth) > context.width {
+                imageWidth = 16 * (CGFloat(context.width) / 16).rounded(.awayFromZero)
+            }
+            
+            let center = CGPoint.zero
+            
+            context.clear(CGRect(x: 0.0, y: 0.0, width: imageWidth, height: imageHeight))
+            
+            // set the context's background color
+            context.fill(CGRect(x: 0.0, y: 0.0, width: CGFloat(context.width), height: CGFloat(context.height)))
+            context.concatenate(.identity)
+            
+            // draw the image in the context
+            
+            if let cgImage = image.cgImage {
+                context.draw(cgImage, in: CGRect(x: center.x, y: center.y, width: imageWidth, height: imageHeight))
+            }
+            
+            // unlock the buffer memory
+            CVPixelBufferUnlockBaseAddress(pixelBuffer, CVPixelBufferLockFlags(rawValue: CVOptionFlags(0)))
+        }
+    }
+    
   
   /**
    Plays the animation from a progress (0-1) to a progress (0-1).
@@ -907,7 +1095,7 @@ final public class AnimationView: LottieView {
     
     self.animationContext = animationContext
     
-//    guard self.window != nil else { waitingToPlayAimation = true; return }
+    guard self.window != nil else { waitingToPlayAimation = true; return }
     
     animationID = animationID + 1
     activeAnimationName = AnimationView.animationName + String(animationID)

@@ -123,6 +123,8 @@ class CompositionLayer: CALayer, KeypathSearchable {
   func displayContentsWithFrame(frame: CGFloat, forceUpdates: Bool) {
     /// To be overridden by subclass
   }
+    
+    
   
   // MARK: Keypath Searchable
   
